@@ -30,7 +30,7 @@ namespace Lab1
 			{
 				listener = new TcpListener(IPAddress.Parse("127.0.0.1"), port);
 				listener.Start();
-				Console.WriteLine("Ожидание подключений...");
+				Console.WriteLine("Waiting for incoming conections...");
 
 				while (true)
 				{
