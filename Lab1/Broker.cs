@@ -5,35 +5,54 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using System.Collections.Concurrent;
+using System.Threading;
 
 namespace Lab1
 {
 	class Broker
 	{
 		private static readonly Broker instance = new Broker();
-
+		private static MessageDictionary queueDictionary;
+		public static List<Client> Subscribers { get; set; }
+		public static List<Client> Publishers { get; set; }
+		//public static Dictionary<Client, DateTime> Publishers { get; set; }
 		private Broker()
 		{
-			QueueDictionary = new Dictionary<string, Queue<Message>>();
+			queueDictionary = new MessageDictionary();
+			Subscribers = new List<Client>();
+			Publishers = new List<Client>();
+
+			Task checkPublishers = new Task(() =>
+			{
+				while (true)
+				{
+					if (Publishers.Count > 0)
+						for (int i = 0; i < Publishers.Count; i++)
+						{
+							try
+							{
+								var retMsg = Encoding.Unicode.GetBytes("Check");
+								//stream.Write(retMsg, 0, retMsg.Length);
+								Publishers[i].client.GetStream().Write(retMsg, 0, retMsg.Length);
+							}
+							catch
+							{
+								MessageDictionary.SendDieMessage(new Message() {Name = Publishers[i].ClientName});
+								Publishers.Remove(Publishers[i--]);
+							}
+						}
+					Thread.Sleep(15000);
+				}
+
+			});
+			checkPublishers.Start();
+			//Publishers = new Dictionary<Client, DateTime>();
 		}
 
 		public static Broker GetInstance()
 		{
 			return instance;
-		}
-		public Dictionary<string, Queue<Message>> QueueDictionary { get; set; }
-
-		public void AddMsg(Message msg)
-		{
-			if (!QueueDictionary.ContainsKey(msg.Name))
-				QueueDictionary.Add(msg.Name, new Queue<Message>());
-			QueueDictionary[msg.Name].Enqueue(msg);
-		}
-
-		public void GetAnswerMsg(Message msg, NetworkStream stream)
-		{
-			var retMsg = Encoding.Unicode.GetBytes(JsonConvert.SerializeObject(msg));
-			stream.Write(retMsg, 0, retMsg.Length);
 		}
 
 		public void ProcessingMsg(Message msg, NetworkStream stream)
@@ -41,22 +60,26 @@ namespace Lab1
 			if (msg.TypeMsg != "die" && msg.TypeMsg != "willdie")
 			{
 				if (msg.IsSender)
-					AddMsg(msg);
+					queueDictionary.AddMessage(msg);
 				else
 				{
-					if (!QueueDictionary.ContainsKey(msg.TypeMsg))
-					{
-						GetAnswerMsg(new Message() {IsSender = false, Msg = "Non-existend type msg", Name = "Server", TypeMsg = "Error"}, stream );
-						return;
-					}
-					if (QueueDictionary[msg.TypeMsg].Count == 0)
-					{
-						GetAnswerMsg(new Message() { IsSender = false, Msg = "Queue is empty", Name = "Server", TypeMsg = "Error" }, stream);
-						return;
-					}
-					GetAnswerMsg(QueueDictionary[msg.TypeMsg].Dequeue(), stream);
+					
+						queueDictionary.SendMessageSub(msg, stream);
 				}
+					
 			}
+			else if (msg.TypeMsg == "willdie")
+				queueDictionary.SendWillDieMessage(msg);
+			else if (msg.TypeMsg == "die")
+			{
+				MessageDictionary.SendDieMessage(msg);
+			}
+		}
+
+		
+		public static void Dispose()
+		{
+			queueDictionary.Dispose();
 		}
 	}
 }
